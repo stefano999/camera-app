@@ -121,29 +121,15 @@ class UserController {
     
     // 获取用户列表
     public function getUsers() {
-        $auth = new AuthMiddleware();
-        
-        if (!$auth->isAuthenticated()) {
-            Response::json(401, 'Unauthorized');
-            return;
-        }
-        
-        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
-            Response::json(403, 'Forbidden');
-            return;
-        }
-        
-        $user = $auth->getUser();
-        $tenantId = $user['tenant_id'];
-        
-        // 获取查询参数
         $page = isset($_GET['page']) ? intval($_GET['page']) : 1;
         $pageSize = isset($_GET['pageSize']) ? intval($_GET['pageSize']) : 10;
         $departmentId = isset($_GET['departmentId']) ? $_GET['departmentId'] : null;
         $status = isset($_GET['status']) ? $_GET['status'] : null;
-        $search = isset($_GET['search']) ? $_GET['search'] : null;
+        $search = isset($_GET['query']) ? $_GET['query'] : null;
         
-        // 获取用户列表
+        $user = $this->auth->getUser();
+        $tenantId = $user['tenant_id'];
+        
         $user_model = new User();
         $result = $user_model->getUsers($tenantId, $page, $pageSize, $departmentId, $status, $search);
         

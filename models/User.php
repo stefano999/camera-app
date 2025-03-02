@@ -12,18 +12,30 @@ class User {
         $this->conn = $database->getConnection();
     }
     
-    // 获取系统管理员
-    public function getSysAdmin($username) {
-        $query = "SELECT u.user_id, u.username, u.password, u.tenant_id, u.real_name, u.role_id, r.permissions 
+     // 获取系统管理员
+     public function getSysAdmin($username) {
+        $query = "SELECT 
+                    u.user_id, 
+                    u.username, 
+                    u.password, 
+                    u.tenant_id, 
+                    u.real_name, 
+                    u.role_id, 
+                    r.role_name,
+                    r.permissions 
                   FROM " . $this->table_name . " u
                   JOIN user_roles r ON u.role_id = r.role_id
-                  WHERE u.username = ? AND u.tenant_id = 1 AND r.permissions = 'all'";
+                  WHERE u.username = ? 
+                  AND u.tenant_id = 1 
+                  AND r.permissions = 'all'
+                  AND u.status = 'active'";
         
         $stmt = $this->conn->prepare($query);
         $stmt->execute([$username]);
         
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
+
     
     // 根据用户名和租户ID获取用户
     public function getUserByUsername($username, $tenant_id) {
