@@ -1,6 +1,10 @@
 <?php
 // index.php - API主入口文件
 
+// 调试输出
+error_log("Request: " . $_SERVER['REQUEST_URI']);
+error_log("Request Method: " . $_SERVER['REQUEST_METHOD']);
+
 // 允许跨域请求
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
@@ -19,7 +23,7 @@ require_once './utils/Response.php';
 
 // 获取请求路径
 $request_uri = $_SERVER['REQUEST_URI'];
-$base_path = '/attendance-api';  // 根路径
+$base_path = '/aapi';  // 新的根路径
 $path = str_replace($base_path, '', $request_uri);
 
 // 解析请求路径以确定控制器和方法
@@ -28,14 +32,21 @@ $controller = isset($path_parts[0]) && !empty($path_parts[0]) ? $path_parts[0] :
 $method = isset($path_parts[1]) && !empty($path_parts[1]) ? $path_parts[1] : 'index';
 $param = isset($path_parts[2]) ? $path_parts[2] : null;
 
+// 调试日志
+error_log("Controller: " . $controller);
+error_log("Method: " . $method);
+error_log("Param: " . $param);
+
 // 路由分发
 try {
     switch ($controller) {
         case 'auth':
+            error_log("Auth controller called.");
             require_once './controllers/AuthController.php';
             $auth_controller = new AuthController();
             
             if ($method === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+                error_log("Executing login method");
                 $auth_controller->login();
             } elseif ($method === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $auth_controller->logout();
@@ -50,11 +61,13 @@ try {
             } elseif (preg_match('/^tenants\/(\d+)\/status$/', $method, $matches) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
                 $auth_controller->updateTenantStatus($matches[1]);
             } else {
+                error_log("Auth endpoint not found: $method");
                 Response::json(404, 'Endpoint not found');
             }
             break;
             
         case 'user':
+            error_log("User controller called.");
             require_once './controllers/UserController.php';
             require_once './middleware/AuthMiddleware.php';
             
@@ -73,47 +86,60 @@ try {
                 $user_controller->updateProfile();
             } elseif ($method === 'change-password' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $user_controller->changePassword();
+            } elseif (empty($method) || $method === 'index') {
+                // 兼容前端直接调用/user的情况
+                if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+                    Response::json(403, 'Forbidden');
+                    break;
+                }
+                error_log("Redirecting /user to getUsers");
+                $user_controller->getUsers();
             } else {
                 Response::json(404, 'Endpoint not found');
             }
             break;
             
-            case 'users':
-                require_once './controllers/UserController.php';
-                require_once './middleware/AuthMiddleware.php';
-                
-                $user_controller = new UserController();
-                
-                // 验证认证和授权
-                $auth = new AuthMiddleware();
-                if (!$auth->isAuthenticated()) {
-                    Response::json(401, 'Unauthorized');
-                    break;
-                }
-                
-                if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
-                    Response::json(403, 'Forbidden');
-                    break;
-                }
-                
-                if ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-                    $user_controller->getUsers();
-                } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
-                    $user_controller->getUserById($method);
-                } elseif ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-                    $user_controller->addUser();
-                } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
-                    $user_controller->updateUser($method);
-                } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'DELETE') {
-                    $user_controller->deleteUser($method);
-                } elseif ($method === 'import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-                    $user_controller->importUsers();
-                } else {
-                    Response::json(404, 'Endpoint not found');
-                }
+        case 'users':
+            error_log("Users controller called.");
+            require_once './controllers/UserController.php';
+            require_once './middleware/AuthMiddleware.php';
+            
+            $user_controller = new UserController();
+            
+            // 验证认证和授权
+            $auth = new AuthMiddleware();
+            if (!$auth->isAuthenticated()) {
+                Response::json(401, 'Unauthorized');
                 break;
+            }
+            
+            if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+                Response::json(403, 'Forbidden');
+                break;
+            }
+            
+            if ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                $user_controller->getUsers();
+            } elseif (empty($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                // 兼容前端直接调用/users的情况
+                $user_controller->getUsers();
+            } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                $user_controller->getUserById($method);
+            } elseif ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+                $user_controller->addUser();
+            } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
+                $user_controller->updateUser($method);
+            } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'DELETE') {
+                $user_controller->deleteUser($method);
+            } elseif ($method === 'import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+                $user_controller->importUsers();
+            } else {
+                Response::json(404, 'Endpoint not found');
+            }
+            break;
             
         case 'attendance':
+            error_log("Attendance controller called.");
             require_once './controllers/AttendanceController.php';
             require_once './middleware/AuthMiddleware.php';
             
@@ -180,6 +206,7 @@ try {
             
         // 添加部门管理相关路由
         case 'departments':
+            error_log("Departments controller called.");
             require_once './controllers/DepartmentController.php';
             require_once './middleware/AuthMiddleware.php';
             
@@ -193,6 +220,9 @@ try {
             }
             
             if ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                $department_controller->getDepartments();
+            } elseif (empty($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                // 兼容前端直接调用/departments的情况
                 $department_controller->getDepartments();
             } elseif ($method === 'tree' && $_SERVER['REQUEST_METHOD'] === 'GET') {
                 $department_controller->getDepartmentTree();
@@ -239,6 +269,7 @@ try {
             
         // 添加考勤规则相关路由
         case 'rules':
+            error_log("Rules controller called.");
             require_once './controllers/AttendanceRuleController.php';
             require_once './middleware/AuthMiddleware.php';
             
@@ -252,6 +283,9 @@ try {
             }
             
             if ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                $rule_controller->getRules();
+            } elseif (empty($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                // 兼容前端直接调用/rules的情况
                 $rule_controller->getRules();
             } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
                 $rule_controller->getRuleById($method);
@@ -282,6 +316,7 @@ try {
             
         // 添加报表管理相关路由
         case 'reports':
+            error_log("Reports controller called.");
             require_once './controllers/ReportController.php';
             require_once './middleware/AuthMiddleware.php';
             
@@ -340,5 +375,6 @@ try {
             break;
     }
 } catch (Exception $e) {
+    error_log("Exception: " . $e->getMessage());
     Response::json(500, 'Server error: ' . $e->getMessage());
 }
