@@ -15,12 +15,12 @@ class Attendance {
         $this->conn = $database->getConnection();
     }
     
-    // 获取打卡记录
+    // 获取打卡记录（支持更复杂的查询）
     public function getAttendanceRecords($user_id, $tenant_id, $start_date, $end_date) {
         $query = "SELECT * FROM " . $this->records_table . " 
                   WHERE user_id = ? AND tenant_id = ? 
                   AND work_date BETWEEN ? AND ? 
-                  ORDER BY work_date DESC";
+                  ORDER BY work_date DESC, record_id DESC";
         
         $stmt = $this->conn->prepare($query);
         $stmt->execute([$user_id, $tenant_id, $start_date, $end_date]);
@@ -35,7 +35,7 @@ class Attendance {
                   JOIN users u ON a.user_id = u.user_id
                   WHERE u.department_id = ? AND a.tenant_id = ? 
                   AND a.work_date BETWEEN ? AND ? 
-                  ORDER BY a.work_date DESC, u.real_name ASC";
+                  ORDER BY a.work_date DESC, a.record_id DESC, u.real_name ASC";
         
         $stmt = $this->conn->prepare($query);
         $stmt->execute([$department_id, $tenant_id, $start_date, $end_date]);
@@ -43,105 +43,56 @@ class Attendance {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     
-    // 签到
+    // 签到 - 支持多次签到
     public function checkIn($user_id, $tenant_id, $data) {
-        // 检查今天是否已经打过卡
-        $work_date = date('Y-m-d');
-        $check_query = "SELECT record_id, check_in_time FROM " . $this->records_table . " 
-                        WHERE user_id = ? AND tenant_id = ? AND work_date = ?";
+        // 使用罗马时区获取当前时间
+        $now = new DateTime('now', new DateTimeZone('Europe/Rome'));
+        $now_str = $now->format('Y-m-d H:i:s');
         
-        $check_stmt = $this->conn->prepare($check_query);
-        $check_stmt->execute([$user_id, $tenant_id, $work_date]);
-        $existing_record = $check_stmt->fetch(PDO::FETCH_ASSOC);
+        // 获取当前日期
+        $work_date = $now->format('Y-m-d');
         
-        if ($existing_record && $existing_record['check_in_time']) {
-            return [
-                'success' => false,
-                'message' => '今天已经签到过了',
-                'data' => [
-                    'record_id' => $existing_record['record_id'],
-                    'check_in_time' => $existing_record['check_in_time']
-                ]
-            ];
-        }
+        // 创建新的签到记录
+        $insert_query = "INSERT INTO " . $this->records_table . " 
+                        (user_id, tenant_id, work_date, check_in_time, 
+                         check_in_location, check_in_geo_latitude, check_in_geo_longitude, 
+                         check_in_device, check_in_wifi, check_in_photo_url, status, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'normal', ?)";
         
-        // 获取当前时间
-        $now = date('Y-m-d H:i:s');
+        $stmt = $this->conn->prepare($insert_query);
+        $result = $stmt->execute([
+            $user_id, 
+            $tenant_id, 
+            $work_date, 
+            $now_str,
+            $data['location'] ?? null,
+            $data['latitude'] ?? null, 
+            $data['longitude'] ?? null,
+            $data['device'] ?? null, 
+            $data['wifi'] ?? null,
+            $data['photo'] ?? null,
+            $data['notes'] ?? null
+        ]);
         
-        // 准备打卡数据
-        $check_in_data = [
-            'user_id' => $user_id,
-            'tenant_id' => $tenant_id,
-            'work_date' => $work_date,
-            'check_in_time' => $now,
-            'check_in_location' => $data['location'] ?? null,
-            'check_in_geo_latitude' => $data['latitude'] ?? null,
-            'check_in_geo_longitude' => $data['longitude'] ?? null,
-            'check_in_device' => $data['device'] ?? null,
-            'check_in_wifi' => $data['wifi'] ?? null,
-            'check_in_photo_url' => $data['photo'] ?? null,
-            'status' => 'normal', // 初始状态设为正常
-            'notes' => $data['notes'] ?? null
-        ];
+        $record_id = $this->conn->lastInsertId();
         
-        // 判断是否需要创建新记录
-        if ($existing_record) {
-            // 更新现有记录
-            $update_query = "UPDATE " . $this->records_table . " SET 
-                            check_in_time = ?, check_in_location = ?, check_in_geo_latitude = ?,
-                            check_in_geo_longitude = ?, check_in_device = ?, check_in_wifi = ?,
-                            check_in_photo_url = ?, status = ?, notes = ?, updated_at = NOW()
-                            WHERE record_id = ?";
-            
-            $stmt = $this->conn->prepare($update_query);
-            $result = $stmt->execute([
-                $check_in_data['check_in_time'], 
-                $check_in_data['check_in_location'],
-                $check_in_data['check_in_geo_latitude'], 
-                $check_in_data['check_in_geo_longitude'],
-                $check_in_data['check_in_device'], 
-                $check_in_data['check_in_wifi'],
-                $check_in_data['check_in_photo_url'], 
-                $check_in_data['status'],
-                $check_in_data['notes'], 
-                $existing_record['record_id']
-            ]);
-            
-            $record_id = $existing_record['record_id'];
-        } else {
-            // 创建新记录
-            $insert_query = "INSERT INTO " . $this->records_table . " 
-                           (user_id, tenant_id, work_date, check_in_time, check_in_location, 
-                            check_in_geo_latitude, check_in_geo_longitude, check_in_device, 
-                            check_in_wifi, check_in_photo_url, status, notes) 
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            
-            $stmt = $this->conn->prepare($insert_query);
-            $result = $stmt->execute([
-                $check_in_data['user_id'], 
-                $check_in_data['tenant_id'],
-                $check_in_data['work_date'], 
-                $check_in_data['check_in_time'],
-                $check_in_data['check_in_location'], 
-                $check_in_data['check_in_geo_latitude'],
-                $check_in_data['check_in_geo_longitude'], 
-                $check_in_data['check_in_device'],
-                $check_in_data['check_in_wifi'], 
-                $check_in_data['check_in_photo_url'],
-                $check_in_data['status'], 
-                $check_in_data['notes']
-            ]);
-            
-            $record_id = $this->conn->lastInsertId();
-        }
+        // 获取今天已签到的次数
+        $count_query = "SELECT COUNT(*) as count FROM " . $this->records_table . " 
+                        WHERE user_id = ? AND tenant_id = ? AND work_date = ? AND check_in_time IS NOT NULL";
+        
+        $count_stmt = $this->conn->prepare($count_query);
+        $count_stmt->execute([$user_id, $tenant_id, $work_date]);
+        $count_result = $count_stmt->fetch(PDO::FETCH_ASSOC);
+        $check_in_count = $count_result['count'];
         
         if ($result) {
             return [
                 'success' => true,
-                'message' => '签到成功',
+                'message' => '第' . $check_in_count . '次签到成功',
                 'data' => [
                     'record_id' => $record_id,
-                    'check_in_time' => $now
+                    'check_in_time' => $now_str,
+                    'check_in_count' => $check_in_count
                 ]
             ];
         } else {
@@ -152,71 +103,89 @@ class Attendance {
         }
     }
     
-    // 签退
+    // 签退 - 支持多次签退
     public function checkOut($user_id, $tenant_id, $data) {
-        // 检查今天是否已经打过卡
-        $work_date = date('Y-m-d');
-        $check_query = "SELECT record_id, check_in_time, check_out_time FROM " . $this->records_table . " 
-                        WHERE user_id = ? AND tenant_id = ? AND work_date = ?";
+        // 使用罗马时区获取当前时间
+        $now = new DateTime('now', new DateTimeZone('Europe/Rome'));
+        $now_str = $now->format('Y-m-d H:i:s');
         
-        $check_stmt = $this->conn->prepare($check_query);
-        $check_stmt->execute([$user_id, $tenant_id, $work_date]);
-        $existing_record = $check_stmt->fetch(PDO::FETCH_ASSOC);
+        // 获取当前日期
+        $work_date = $now->format('Y-m-d');
         
-        if (!$existing_record) {
-            return [
-                'success' => false,
-                'message' => '今天还没有签到记录，无法签退'
-            ];
-        }
+        // 创建新的签退记录
+        $insert_query = "INSERT INTO " . $this->records_table . " 
+                        (user_id, tenant_id, work_date, check_out_time, 
+                         check_out_location, check_out_geo_latitude, check_out_geo_longitude, 
+                         check_out_device, check_out_wifi, check_out_photo_url, status, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'normal', ?)";
         
-        if ($existing_record['check_out_time']) {
-            return [
-                'success' => false,
-                'message' => '今天已经签退过了',
-                'data' => [
-                    'check_out_time' => $existing_record['check_out_time']
-                ]
-            ];
-        }
-        
-        // 获取当前时间
-        $now = date('Y-m-d H:i:s');
-        
-        // 计算工作时长（小时）
-        $check_in_time = new DateTime($existing_record['check_in_time']);
-        $check_out_time = new DateTime($now);
-        $interval = $check_in_time->diff($check_out_time);
-        $working_hours = $interval->h + ($interval->i / 60);
-        
-        // 更新记录
-        $update_query = "UPDATE " . $this->records_table . " SET 
-                        check_out_time = ?, check_out_location = ?, check_out_geo_latitude = ?,
-                        check_out_geo_longitude = ?, check_out_device = ?, check_out_wifi = ?,
-                        check_out_photo_url = ?, working_hours = ?, updated_at = NOW()
-                        WHERE record_id = ?";
-        
-        $stmt = $this->conn->prepare($update_query);
+        $stmt = $this->conn->prepare($insert_query);
         $result = $stmt->execute([
-            $now, 
+            $user_id, 
+            $tenant_id, 
+            $work_date, 
+            $now_str,
             $data['location'] ?? null,
             $data['latitude'] ?? null, 
             $data['longitude'] ?? null,
             $data['device'] ?? null, 
             $data['wifi'] ?? null,
-            $data['photo'] ?? null, 
-            $working_hours,
-            $existing_record['record_id']
+            $data['photo'] ?? null,
+            $data['notes'] ?? null
         ]);
+        
+        $record_id = $this->conn->lastInsertId();
+        
+        // 获取今天已签退的次数
+        $count_query = "SELECT COUNT(*) as count FROM " . $this->records_table . " 
+                        WHERE user_id = ? AND tenant_id = ? AND work_date = ? AND check_out_time IS NOT NULL";
+        
+        $count_stmt = $this->conn->prepare($count_query);
+        $count_stmt->execute([$user_id, $tenant_id, $work_date]);
+        $count_result = $count_stmt->fetch(PDO::FETCH_ASSOC);
+        $check_out_count = $count_result['count'];
+        
+        // 尝试找到最近的签到记录来配对计算工作时长
+        $last_check_in_query = "SELECT * FROM " . $this->records_table . " 
+                                WHERE user_id = ? AND tenant_id = ? AND work_date = ? AND check_in_time IS NOT NULL 
+                                AND record_id NOT IN (
+                                    SELECT a.record_id FROM " . $this->records_table . " a
+                                    JOIN " . $this->records_table . " b ON a.user_id = b.user_id 
+                                    AND a.tenant_id = b.tenant_id AND a.work_date = b.work_date
+                                    WHERE a.check_in_time IS NOT NULL AND b.check_out_time IS NOT NULL
+                                    AND a.record_id != b.record_id
+                                    AND a.check_in_time < b.check_out_time
+                                )
+                                ORDER BY check_in_time DESC LIMIT 1";
+        
+        $last_check_in_stmt = $this->conn->prepare($last_check_in_query);
+        $last_check_in_stmt->execute([$user_id, $tenant_id, $work_date]);
+        $last_check_in = $last_check_in_stmt->fetch(PDO::FETCH_ASSOC);
+        
+        $working_hours = null;
+        
+        // 如果找到了可配对的签到记录，计算工作时长
+        if ($last_check_in && !empty($last_check_in['check_in_time'])) {
+            $check_in_time = new DateTime($last_check_in['check_in_time'], new DateTimeZone('Europe/Rome'));
+            $check_out_time = new DateTime($now_str, new DateTimeZone('Europe/Rome'));
+            $interval = $check_in_time->diff($check_out_time);
+            $working_hours = $interval->h + ($interval->i / 60);
+            
+            // 更新工作时长
+            $update_hours_query = "UPDATE " . $this->records_table . " SET working_hours = ? WHERE record_id = ?";
+            $update_hours_stmt = $this->conn->prepare($update_hours_query);
+            $update_hours_stmt->execute([$working_hours, $record_id]);
+        }
         
         if ($result) {
             return [
                 'success' => true,
-                'message' => '签退成功',
+                'message' => '第' . $check_out_count . '次签退成功',
                 'data' => [
-                    'record_id' => $existing_record['record_id'],
-                    'check_out_time' => $now,
-                    'working_hours' => round($working_hours, 2)
+                    'record_id' => $record_id,
+                    'check_out_time' => $now_str,
+                    'working_hours' => $working_hours ? round($working_hours, 2) : null,
+                    'check_out_count' => $check_out_count
                 ]
             ];
         } else {
@@ -229,29 +198,71 @@ class Attendance {
     
     // 获取今日打卡状态
     public function getTodayAttendance($user_id, $tenant_id) {
-        $work_date = date('Y-m-d');
-        $query = "SELECT * FROM " . $this->records_table . " 
-                  WHERE user_id = ? AND tenant_id = ? AND work_date = ?";
-        
-        $stmt = $this->conn->prepare($query);
-        $stmt->execute([$user_id, $tenant_id, $work_date]);
-        
-        $record = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if (!$record) {
+        try {
+            // 使用罗马时区获取当前日期
+            $work_date = (new DateTime('now', new DateTimeZone('Europe/Rome')))->format('Y-m-d');
+            
+            error_log("Fetching attendance for user: $user_id, tenant: $tenant_id, date: $work_date");
+            
+            // 查询当天的所有记录
+            $query = "SELECT * FROM " . $this->records_table . " 
+                      WHERE user_id = ? AND tenant_id = ? AND work_date = ?
+                      ORDER BY record_id DESC";
+            
+            $stmt = $this->conn->prepare($query);
+            $stmt->execute([$user_id, $tenant_id, $work_date]);
+            $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            error_log("Records found: " . count($records));
+            
+            if (empty($records)) {
+                return [
+                    'has_record' => false,
+                    'checked_in' => false,
+                    'checked_out' => false,
+                    'records' => []
+                ];
+            }
+            
+            // 获取所有签到和签退记录
+            $check_in_records = array_filter($records, function($record) {
+                return !empty($record['check_in_time']);
+            });
+            
+            $check_out_records = array_filter($records, function($record) {
+                return !empty($record['check_out_time']);
+            });
+            
+            // 获取最后一条记录
+            $last_record = $records[0];
+            
+            // 计算总工作时长
+            $total_working_hours = 0;
+            foreach ($records as $record) {
+                $total_working_hours += $record['working_hours'] ?? 0;
+            }
+            
             return [
-                'has_record' => false,
-                'checked_in' => false,
-                'checked_out' => false
+                'has_record' => true,
+                'records' => $records,
+                'check_in_records' => array_values($check_in_records),
+                'check_out_records' => array_values($check_out_records),
+                'check_in_count' => count($check_in_records),
+                'check_out_count' => count($check_out_records),
+                'total_records' => count($records),
+                'total_working_hours' => round($total_working_hours, 2),
+                'first_check_in' => $check_in_records ? end($check_in_records)['check_in_time'] : null,
+                'last_check_out' => $check_out_records ? reset($check_out_records)['check_out_time'] : null,
+                'latest_record' => $last_record,
+                'checked_in' => !empty($check_in_records),
+                'checked_out' => !empty($check_out_records)
             ];
+        } catch (Exception $e) {
+            error_log("Error in getTodayAttendance: " . $e->getMessage());
+            error_log("Trace: " . $e->getTraceAsString());
+            
+            throw new Exception("Unable to retrieve today's attendance: " . $e->getMessage());
         }
-        
-        return [
-            'has_record' => true,
-            'record' => $record,
-            'checked_in' => !empty($record['check_in_time']),
-            'checked_out' => !empty($record['check_out_time'])
-        ];
     }
     
     // 申请补卡
@@ -274,7 +285,8 @@ class Attendance {
         
         // 获取原始打卡记录
         $query = "SELECT * FROM " . $this->records_table . " 
-                  WHERE user_id = ? AND tenant_id = ? AND work_date = ?";
+                  WHERE user_id = ? AND tenant_id = ? AND work_date = ?
+                  ORDER BY record_id DESC LIMIT 1";
         
         $stmt = $this->conn->prepare($query);
         $stmt->execute([$user_id, $tenant_id, $data['work_date']]);
@@ -373,61 +385,50 @@ class Attendance {
     
     // 根据补卡申请更新打卡记录
     private function updateAttendanceWithCorrection($correction) {
-        // 检查是否已有打卡记录
-        $query = "SELECT * FROM " . $this->records_table . " 
-                  WHERE user_id = ? AND tenant_id = ? AND work_date = ?";
+        // 创建新记录而不是更新现有记录，以支持多次打卡
+        $check_in_time = $correction['correction_type'] == 'check_in' ? $correction['corrected_time'] : null;
+        $check_out_time = $correction['correction_type'] == 'check_out' ? $correction['corrected_time'] : null;
+        
+        $query = "INSERT INTO " . $this->records_table . " 
+                 (user_id, tenant_id, work_date, check_in_time, check_out_time, status, notes) 
+                 VALUES (?, ?, ?, ?, ?, 'normal', '补卡记录')";
         
         $stmt = $this->conn->prepare($query);
         $stmt->execute([
             $correction['user_id'],
             $correction['tenant_id'],
-            $correction['work_date']
+            $correction['work_date'],
+            $check_in_time,
+            $check_out_time
         ]);
         
-        $record = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($record) {
-            // 更新现有记录
-            $field = $correction['correction_type'] == 'check_in' ? 'check_in_time' : 'check_out_time';
-            $query = "UPDATE " . $this->records_table . " SET $field = ?, updated_at = NOW() WHERE record_id = ?";
+        // 如果是签退补卡，尝试计算工作时长
+        if ($correction['correction_type'] == 'check_out' && $check_out_time) {
+            // 尝试找到最近未配对的签到记录
+            $last_check_in_query = "SELECT * FROM " . $this->records_table . " 
+                                    WHERE user_id = ? AND tenant_id = ? AND work_date = ? 
+                                    AND check_in_time IS NOT NULL AND record_id != LAST_INSERT_ID()
+                                    ORDER BY check_in_time DESC LIMIT 1";
             
-            $stmt = $this->conn->prepare($query);
-            $stmt->execute([
-                $correction['corrected_time'],
-                $record['record_id']
+            $last_check_in_stmt = $this->conn->prepare($last_check_in_query);
+            $last_check_in_stmt->execute([
+                $correction['user_id'],
+                $correction['tenant_id'],
+                $correction['work_date']
             ]);
+            $last_check_in = $last_check_in_stmt->fetch(PDO::FETCH_ASSOC);
             
-            // 如果有check_in和check_out，计算工作时长
-            if ($record['check_in_time'] && ($field == 'check_out_time' || $record['check_out_time'])) {
-                $check_in_time = new DateTime($record['check_in_time']);
-                $check_out_time = new DateTime($field == 'check_out_time' ? $correction['corrected_time'] : $record['check_out_time']);
+            if ($last_check_in && !empty($last_check_in['check_in_time'])) {
+                $check_in_time = new DateTime($last_check_in['check_in_time']);
+                $check_out_time = new DateTime($correction['corrected_time']);
                 $interval = $check_in_time->diff($check_out_time);
                 $working_hours = $interval->h + ($interval->i / 60);
                 
-                $query = "UPDATE " . $this->records_table . " SET working_hours = ? WHERE record_id = ?";
-                $stmt = $this->conn->prepare($query);
-                $stmt->execute([
-                    $working_hours,
-                    $record['record_id']
-                ]);
+                $record_id = $this->conn->lastInsertId();
+                $update_query = "UPDATE " . $this->records_table . " SET working_hours = ? WHERE record_id = ?";
+                $update_stmt = $this->conn->prepare($update_query);
+                $update_stmt->execute([$working_hours, $record_id]);
             }
-        } else {
-            // 创建新记录
-            $check_in_time = $correction['correction_type'] == 'check_in' ? $correction['corrected_time'] : null;
-            $check_out_time = $correction['correction_type'] == 'check_out' ? $correction['corrected_time'] : null;
-            
-            $query = "INSERT INTO " . $this->records_table . " 
-                     (user_id, tenant_id, work_date, check_in_time, check_out_time, status) 
-                     VALUES (?, ?, ?, ?, ?, 'normal')";
-            
-            $stmt = $this->conn->prepare($query);
-            $stmt->execute([
-                $correction['user_id'],
-                $correction['tenant_id'],
-                $correction['work_date'],
-                $check_in_time,
-                $check_out_time
-            ]);
         }
     }
     
@@ -605,14 +606,14 @@ class Attendance {
         $query = "SELECT * FROM " . $this->records_table . " 
                   WHERE user_id = ? AND tenant_id = ? 
                   AND work_date BETWEEN ? AND ? 
-                  ORDER BY work_date ASC";
+                  ORDER BY work_date ASC, record_id ASC";
         
         $stmt = $this->conn->prepare($query);
         $stmt->execute([$user_id, $tenant_id, $start_date, $end_date]);
         $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        // 统计数据
-        $total_days = count($records);
+        // 按日期分组统计
+        $dates = [];
         $normal_days = 0;
         $late_days = 0;
         $early_leave_days = 0;
@@ -620,22 +621,42 @@ class Attendance {
         $total_working_hours = 0;
         
         foreach ($records as $record) {
-            switch ($record['status']) {
-                case 'normal':
-                    $normal_days++;
-                    break;
-                case 'late':
-                    $late_days++;
-                    break;
-                case 'early_leave':
-                    $early_leave_days++;
-                    break;
-                case 'absent':
-                    $absent_days++;
-                    break;
+            $date = $record['work_date'];
+            
+            if (!isset($dates[$date])) {
+                $dates[$date] = [
+                    'has_late' => false,
+                    'has_early_leave' => false,
+                    'has_absent' => false,
+                    'working_hours' => 0
+                ];
             }
             
+            // 检查状态
+            if ($record['status'] === 'late') {
+                $dates[$date]['has_late'] = true;
+            } else if ($record['status'] === 'early_leave') {
+                $dates[$date]['has_early_leave'] = true;
+            } else if ($record['status'] === 'absent') {
+                $dates[$date]['has_absent'] = true;
+            }
+            
+            // 累计工作时长
+            $dates[$date]['working_hours'] += $record['working_hours'] ?? 0;
             $total_working_hours += $record['working_hours'] ?? 0;
+        }
+        
+                    // 统计各类天数
+        foreach ($dates as $date_stats) {
+            if ($date_stats['has_absent']) {
+                $absent_days++;
+            } else if ($date_stats['has_late']) {
+                $late_days++;
+            } else if ($date_stats['has_early_leave']) {
+                $early_leave_days++;
+            } else {
+                $normal_days++;
+            }
         }
         
         // 获取加班记录
@@ -653,7 +674,7 @@ class Attendance {
         return [
             'year' => $year,
             'month' => $month,
-            'total_days' => $total_days,
+            'total_days' => count($dates),
             'normal_days' => $normal_days,
             'late_days' => $late_days,
             'early_leave_days' => $early_leave_days,

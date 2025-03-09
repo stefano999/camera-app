@@ -332,4 +332,36 @@ class AuthController {
             error_log('日志记录失败: ' . $e->getMessage());
         }
     }
+   /**
+ * 获取活跃租户列表（用于登录页面选择框）
+ * 此方法不需要身份验证，任何人都可以访问
+ */
+public function getActiveTenants() {
+    try {
+        require_once __DIR__ . '/../models/Tenant.php';
+        
+        $tenant_model = new Tenant();
+        $tenants = $tenant_model->getActiveTenants();
+        
+        // 确保结果是数组
+        if (!is_array($tenants)) {
+            $tenants = [];
+        }
+        
+        // 只返回必要的字段，减少数据传输
+        $simplified_tenants = array_map(function($tenant) {
+            return [
+                'tenant_id' => $tenant['tenant_id'],
+                'tenant_name' => $tenant['tenant_name'],
+                'tenant_code' => $tenant['tenant_code'],
+                'logo_url' => isset($tenant['logo_url']) ? $tenant['logo_url'] : null
+            ];
+        }, $tenants);
+        
+        Response::json(200, 'Active tenants retrieved successfully', $simplified_tenants);
+    } catch (Exception $e) {
+        error_log('Error in getActiveTenants: ' . $e->getMessage());
+        Response::json(500, 'Server error retrieving tenants');
+    }
+}
 }

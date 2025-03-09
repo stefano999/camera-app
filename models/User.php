@@ -79,7 +79,9 @@ class User {
     
     // 获取用户列表
     public function getUsers($tenant_id, $page = 1, $page_size = 10, $department_id = null, $status = null, $search = null) {
-        // 计算偏移量
+        // 确保分页参数是整数
+        $page = intval($page);
+        $page_size = intval($page_size);
         $offset = ($page - 1) * $page_size;
         
         // 构建查询条件
@@ -108,17 +110,14 @@ class User {
         
         // 查询用户列表
         $query = "SELECT u.user_id, u.tenant_id, u.department_id, u.employee_id, u.username, 
-                        u.real_name, u.email, u.phone, u.avatar_url, u.role_id, u.position, 
-                        u.hire_date, u.status, d.department_name, r.role_name
-                 FROM " . $this->table_name . " u
-                 LEFT JOIN departments d ON u.department_id = d.department_id
-                 LEFT JOIN user_roles r ON u.role_id = r.role_id
-                 WHERE $where_clause
-                 ORDER BY u.user_id DESC
-                 LIMIT ? OFFSET ?";
-        
-        $params[] = $page_size;
-        $params[] = $offset;
+        u.real_name, u.email, u.phone, u.avatar_url, u.role_id, u.position, 
+        u.hire_date, u.status, d.department_name, r.role_name
+        FROM " . $this->table_name . " u
+        LEFT JOIN departments d ON u.department_id = d.department_id
+        LEFT JOIN user_roles r ON u.role_id = r.role_id
+        WHERE $where_clause
+        ORDER BY u.user_id DESC
+        LIMIT $page_size OFFSET $offset";
         
         $stmt = $this->conn->prepare($query);
         $stmt->execute($params);
@@ -127,7 +126,7 @@ class User {
         // 查询总数
         $count_query = "SELECT COUNT(*) as total FROM " . $this->table_name . " u WHERE $where_clause";
         $count_stmt = $this->conn->prepare($count_query);
-        $count_stmt->execute(array_slice($params, 0, -2)); // 移除分页参数
+        $count_stmt->execute($params); // 不需要移除参数，因为我们不再使用LIMIT和OFFSET占位符
         $count_result = $count_stmt->fetch(PDO::FETCH_ASSOC);
         $total = $count_result['total'];
         

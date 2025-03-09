@@ -121,14 +121,21 @@ class UserController {
     
     // 获取用户列表
     public function getUsers() {
+        $auth = new AuthMiddleware();
+        
+        if (!$auth->isAuthenticated()) {
+            Response::json(401, 'Unauthorized');
+            return;
+        }
+        
+        $user = $auth->getUser();
+        $tenantId = $user['tenant_id'];
+        
         $page = isset($_GET['page']) ? intval($_GET['page']) : 1;
         $pageSize = isset($_GET['pageSize']) ? intval($_GET['pageSize']) : 10;
         $departmentId = isset($_GET['departmentId']) ? $_GET['departmentId'] : null;
         $status = isset($_GET['status']) ? $_GET['status'] : null;
         $search = isset($_GET['query']) ? $_GET['query'] : null;
-        
-        $user = $this->auth->getUser();
-        $tenantId = $user['tenant_id'];
         
         $user_model = new User();
         $result = $user_model->getUsers($tenantId, $page, $pageSize, $departmentId, $status, $search);

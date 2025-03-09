@@ -14,12 +14,18 @@ class Database {
         
         try {
             $this->conn = new PDO(
-                "mysql:host=" . $this->host . ";dbname=" . $this->database,
+                "mysql:host=" . $this->host . ";dbname=" . $this->database . ";charset=utf8mb4",
                 $this->username,
                 $this->password
             );
             $this->conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $this->conn->exec("set names utf8");
+            
+            // 设置欧洲时区 (中欧时间)
+            $this->conn->exec("SET time_zone = 'Europe/Berlin'");
+            
+            // 确保使用UTF-8mb4字符集，此字符集完全支持中文等多字节字符
+            // 已在DSN中设置charset=utf8mb4，因此下面这行不是必须的
+            // $this->conn->exec("set names utf8mb4");
         } catch(PDOException $e) {
             echo "Connection Error: " . $e->getMessage();
         }

@@ -22,8 +22,8 @@ require_once './config/database.php';
 require_once './utils/Response.php';
 
 // 获取请求路径
-$request_uri = $_SERVER['REQUEST_URI'];
-$base_path = '/aapi';  // 新的根路径
+$request_uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$base_path = '/aapi';  // 根路径
 $path = str_replace($base_path, '', $request_uri);
 
 // 解析请求路径以确定控制器和方法
@@ -43,6 +43,7 @@ try {
         case 'auth':
             error_log("Auth controller called.");
             require_once './controllers/AuthController.php';
+            
             $auth_controller = new AuthController();
             
             if ($method === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -60,6 +61,10 @@ try {
                 $auth_controller->updateTenant($matches[1]);
             } elseif (preg_match('/^tenants\/(\d+)\/status$/', $method, $matches) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
                 $auth_controller->updateTenantStatus($matches[1]);
+            } elseif ($method === 'active-tenants' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                // 获取活跃租户列表（用于登录页面选择框）
+                // 此路由不需要身份验证，任何人都可以访问
+                $auth_controller->getActiveTenants();
             } else {
                 error_log("Auth endpoint not found: $method");
                 Response::json(404, 'Endpoint not found');
@@ -203,6 +208,248 @@ try {
                 Response::json(404, 'Endpoint not found');
             }
             break;
+            case 'shifts':
+    error_log("Shifts controller called.");
+    require_once './controllers/ShiftController.php';
+    require_once './middleware/AuthMiddleware.php';
+    
+    $shift_controller = new ShiftController();
+    
+    // 验证认证
+    $auth = new AuthMiddleware();
+    if (!$auth->isAuthenticated()) {
+        Response::json(401, 'Unauthorized');
+        break;
+    }
+    
+    if ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $shift_controller->getShifts();
+    } elseif (empty($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        // 兼容前端直接调用/shifts的情况
+        $shift_controller->getShifts();
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $shift_controller->getShiftById($method);
+    } elseif ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $shift_controller->createShift();
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $shift_controller->updateShift($method);
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'DELETE') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $shift_controller->deleteShift($method);
+    } else {
+        Response::json(404, 'Endpoint not found');
+    }
+    break;
+
+// 排班规则相关路由
+case 'schedule-rules':
+    error_log("Schedule Rules controller called.");
+    require_once './controllers/ScheduleRuleController.php';
+    require_once './middleware/AuthMiddleware.php';
+    
+    $rule_controller = new ScheduleRuleController();
+    
+    // 验证认证
+    $auth = new AuthMiddleware();
+    if (!$auth->isAuthenticated()) {
+        Response::json(401, 'Unauthorized');
+        break;
+    }
+    
+    if ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $rule_controller->getRules();
+    } elseif (empty($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        // 兼容前端直接调用/schedule-rules的情况
+        $rule_controller->getRules();
+    } elseif ($method === 'applicable' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $rule_controller->getApplicableRules();
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $rule_controller->getRuleById($method);
+    } elseif ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $rule_controller->createRule();
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $rule_controller->updateRule($method);
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'DELETE') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $rule_controller->deleteRule($method);
+    } elseif (preg_match('/^(\d+)\/status$/', $method, $matches) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $rule_controller->toggleRuleStatus($matches[1]);
+    } else {
+        Response::json(404, 'Endpoint not found');
+    }
+    break;
+
+// 排班模板相关路由
+case 'schedule-templates':
+    error_log("Schedule Templates controller called.");
+    require_once './controllers/ScheduleTemplateController.php';
+    require_once './middleware/AuthMiddleware.php';
+    
+    $template_controller = new ScheduleTemplateController();
+    
+    // 验证认证
+    $auth = new AuthMiddleware();
+    if (!$auth->isAuthenticated()) {
+        Response::json(401, 'Unauthorized');
+        break;
+    }
+    
+    if ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $template_controller->getTemplates();
+    } elseif (empty($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        // 兼容前端直接调用/schedule-templates的情况
+        $template_controller->getTemplates();
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $template_controller->getTemplateById($method);
+    } elseif ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!$auth->hasRole(['department_admin', 'tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $template_controller->createTemplate();
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
+        if (!$auth->hasRole(['department_admin', 'tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $template_controller->updateTemplate($method);
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'DELETE') {
+        if (!$auth->hasRole(['department_admin', 'tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $template_controller->deleteTemplate($method);
+    } else {
+        Response::json(404, 'Endpoint not found');
+    }
+    break;
+
+// 特殊日期相关路由
+case 'special-dates':
+    error_log("Special Dates controller called.");
+    require_once './controllers/SpecialDateController.php';
+    require_once './middleware/AuthMiddleware.php';
+    
+    $date_controller = new SpecialDateController();
+    
+    // 验证认证
+    $auth = new AuthMiddleware();
+    if (!$auth->isAuthenticated()) {
+        Response::json(401, 'Unauthorized');
+        break;
+    }
+    
+    if ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $date_controller->getSpecialDates();
+    } elseif (empty($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        // 兼容前端直接调用/special-dates的情况
+        $date_controller->getSpecialDates();
+    } elseif ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $date_controller->createSpecialDate();
+    } elseif ($method === 'batch' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $date_controller->batchCreateSpecialDates();
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $date_controller->updateSpecialDate($method);
+    } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'DELETE') {
+        if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $date_controller->deleteSpecialDate($method);
+    } else {
+        Response::json(404, 'Endpoint not found');
+    }
+    break;
+
+// 排班管理相关路由
+case 'schedules':
+    error_log("Schedules controller called.");
+    require_once './controllers/ScheduleController.php';
+    require_once './middleware/AuthMiddleware.php';
+    
+    $schedule_controller = new ScheduleController();
+    
+    // 验证认证
+    $auth = new AuthMiddleware();
+    if (!$auth->isAuthenticated()) {
+        Response::json(401, 'Unauthorized');
+        break;
+    }
+    
+    if ($method === 'my' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $schedule_controller->getMySchedules();
+    } elseif (preg_match('/^department\/(\d+)$/', $method, $matches) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        if (!$auth->hasRole(['department_admin', 'tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $schedule_controller->getDepartmentSchedules($matches[1]);
+    } elseif ($method === 'batch' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!$auth->hasRole(['department_admin', 'tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $schedule_controller->batchCreateOrUpdateSchedules();
+    } elseif ($method === 'generate' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!$auth->hasRole(['department_admin', 'tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $schedule_controller->generateSchedules();
+    } elseif ($method === 'statistics' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        if (!$auth->hasRole(['department_admin', 'tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $schedule_controller->getScheduleStats();
+    } elseif ($method === 'daily-stats' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        if (!$auth->hasRole(['department_admin', 'tenant_admin', 'system_admin'])) {
+            Response::json(403, 'Forbidden');
+            break;
+        }
+        $schedule_controller->getDailyScheduleStats();
+    } else {
+        Response::json(404, 'Endpoint not found');
+    }
+    break;
             
         // 添加部门管理相关路由
         case 'departments':
@@ -266,6 +513,29 @@ try {
                 Response::json(404, 'Endpoint not found');
             }
             break;
+            //位置WiFi管理
+            case 'system':
+                error_log("System controller called.");
+                require_once './controllers/SystemController.php';
+                require_once './middleware/AuthMiddleware.php';
+                
+                $system_controller = new SystemController();
+                
+                // 验证认证
+                $auth = new AuthMiddleware();
+                if (!$auth->isAuthenticated()) {
+                    Response::json(401, 'Unauthorized');
+                    break;
+                }
+                
+                if ($method === 'check-location' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+                    $system_controller->checkLocation();
+                } elseif ($method === 'wifi-info' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                    $system_controller->getWifiInfo();
+                } else {
+                    Response::json(404, 'Endpoint not found');
+                }
+                break;
             
         // 添加考勤规则相关路由
         case 'rules':
@@ -313,6 +583,49 @@ try {
                 Response::json(404, 'Endpoint not found');
             }
             break;
+            case 'roles':
+                error_log("Roles controller called.");
+                require_once './controllers/RoleController.php';
+                require_once './middleware/AuthMiddleware.php';
+                
+                $role_controller = new RoleController();
+                
+                // 验证认证
+                $auth = new AuthMiddleware();
+                if (!$auth->isAuthenticated()) {
+                    Response::json(401, 'Unauthorized');
+                    break;
+                }
+                
+                if ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                    $role_controller->getRoles();
+                } elseif (empty($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                    // 兼容前端直接调用/roles的情况
+                    $role_controller->getRoles();
+                } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                    $role_controller->getRoleById($method);
+                } elseif ($method === 'index' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+                    if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+                        Response::json(403, 'Forbidden');
+                        break;
+                    }
+                    $role_controller->createRole();
+                } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
+                    if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+                        Response::json(403, 'Forbidden');
+                        break;
+                    }
+                    $role_controller->updateRole($method);
+                } elseif (is_numeric($method) && $_SERVER['REQUEST_METHOD'] === 'DELETE') {
+                    if (!$auth->hasRole(['tenant_admin', 'system_admin'])) {
+                        Response::json(403, 'Forbidden');
+                        break;
+                    }
+                    $role_controller->deleteRole($method);
+                } else {
+                    Response::json(404, 'Endpoint not found');
+                }
+                break;
             
         // 添加报表管理相关路由
         case 'reports':
@@ -341,6 +654,7 @@ try {
                     Response::json(403, 'Forbidden');
                     break;
                 }
+
                 $report_controller->getDepartmentComparison();
             } elseif ($method === 'employee-export' && $_SERVER['REQUEST_METHOD'] === 'GET') {
                 $report_controller->exportEmployeeReport();
@@ -356,9 +670,11 @@ try {
                     break;
                 }
                 $report_controller->getAbnormalReport();
+            } elseif ($method === 'employee-monthly-timesheet-data' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+                $report_controller->getEmployeeTimesheetData();
             } else {
                 Response::json(404, 'Endpoint not found');
-            }
+            } 
             break;
             
         case 'health':
