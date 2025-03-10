@@ -233,6 +233,10 @@ class AttendanceController {
         $user = $auth->getUser();
         $data = json_decode(file_get_contents("php://input"), true);
         
+        // 添加详细的调试日志
+        error_log("Correction ID in method: " . $correction_id);
+        error_log("Request Data: " . json_encode($data));
+        
         // 验证输入
         if (!isset($data['status']) || !in_array($data['status'], ['approved', 'rejected'])) {
             Response::json(400, 'Invalid status. Status must be either approved or rejected');

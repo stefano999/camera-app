@@ -339,13 +339,18 @@ class Attendance {
     
     // 审核补卡申请
     public function reviewCorrection($correction_id, $approver_id, $status, $comment = null) {
+        // 添加调试日志
+        error_log("Review Correction - ID: $correction_id, Approver: $approver_id, Status: $status");
+        
         // 获取补卡申请
         $query = "SELECT * FROM " . $this->corrections_table . " WHERE correction_id = ?";
         $stmt = $this->conn->prepare($query);
         $stmt->execute([$correction_id]);
         $correction = $stmt->fetch(PDO::FETCH_ASSOC);
         
+        // 添加日志验证申请是否存在
         if (!$correction) {
+            error_log("Correction not found: $correction_id");
             return [
                 'success' => false,
                 'message' => '补卡申请不存在'
